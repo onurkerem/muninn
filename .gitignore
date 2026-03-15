@@ -8,3 +8,4 @@ docs/
 .claude/skills/skill-creator
 .agents/skills/mcp-builder
 .agents/skills/skill-creator
+.mcp.json
