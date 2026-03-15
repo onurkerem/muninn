@@ -23,6 +23,14 @@
   ],
   "author": "Onur Kerem",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/onurkerem/muninn.git"
+  },
+  "bugs": {
+    "url": "https://github.com/onurkerem/muninn/issues"
+  },
+  "homepage": "https://github.com/onurkerem/muninn#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@toon-format/toon": "^2.1.0",
