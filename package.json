@@ -1,6 +1,6 @@
 {
   "name": "@onurkerem/muninn",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "MCP server that gives agents fresh, on-demand access to documentation stored in GitHub repositories",
   "type": "module",
   "bin": {
