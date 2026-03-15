@@ -12,7 +12,7 @@ Add to your MCP client configuration:
     "muninn": {
       "command": "npx",
       "args": [
-        "-y", "@onurkerem/muninn",
+        "-y", "@onurkerem/muninn@latest",
         "--github-pat", "YOUR_GITHUB_PAT",
         "--repos", "owner/repo1,owner/repo2"
       ]
@@ -20,6 +20,16 @@ Add to your MCP client configuration:
   }
 }
 ```
+
+### Version Options
+
+| Config | Behavior |
+|--------|----------|
+| `@onurkerem/muninn@latest` | Always uses the newest version (recommended) |
+| `@onurkerem/muninn@1.0.0` | Pins to a specific version for stability |
+| `@onurkerem/muninn` | Uses cached version (may not auto-update) |
+
+**Note:** Without `@latest` or a specific version, npx caches the package and may not automatically update to newer releases.
 
 ## Configuration
 
