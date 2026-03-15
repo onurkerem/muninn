@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+.env
+.DS_Store
+docs/
+.claude/skills/mcp-builder
+.claude/skills/skill-creator
+.agents/skills/mcp-builder
+.agents/skills/skill-creator

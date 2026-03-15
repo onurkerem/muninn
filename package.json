@@ -1,0 +1,38 @@
+{
+  "name": "@onurkerem/muninn",
+  "version": "0.1.0",
+  "description": "MCP server that gives agents fresh, on-demand access to documentation stored in GitHub repositories",
+  "type": "module",
+  "bin": {
+    "muninn": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "mcp",
+    "github",
+    "documentation",
+    "ai",
+    "llm"
+  ],
+  "author": "Onur Kerem",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@toon-format/toon": "^2.1.0",
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
