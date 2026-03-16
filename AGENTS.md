@@ -98,6 +98,8 @@ muninn/
 | `list_docs` | List .md/.txt files with metadata | TOON |
 | `get_doc` | Fetch file content by path | TOON frontmatter + Markdown |
 | `search_docs` | Full-text search (local, instant) | TOON |
+| `list_images` | List image files (jpg, jpeg, png) with local paths | TOON |
+| `get_image` | Get local file path for an image | TOON |
 
 ---
 
@@ -248,7 +250,7 @@ node dist/index.js --repos "onurkerem/muninn"
 - Vector / semantic search
 - Write operations (create/update files)
 - Webhook-based sync
-- Additional file types (PDF, images)
+- Additional file types (PDF)
 
 ---
 

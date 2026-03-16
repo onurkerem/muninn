@@ -5,9 +5,29 @@
  * Compares tree SHA to detect changes and only downloads modified files.
  */
 
+import * as path from 'path';
 import { GitHubClient, parseRepoString } from '../github.js';
 import { StorageManager, FileMetadata } from './index.js';
 import { StateManager, RepoState } from './state.js';
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png'];
+
+function isImageFile(filePath: string): boolean {
+  const ext = path.extname(filePath).toLowerCase();
+  return IMAGE_EXTENSIONS.includes(ext);
+}
+
+function isTextFile(filePath: string): boolean {
+  return filePath.endsWith('.md') || filePath.endsWith('.txt');
+}
+
+function isSupportedFile(filePath: string): boolean {
+  return isTextFile(filePath) || isImageFile(filePath);
+}
 
 /**
  * Result of a sync operation
@@ -166,11 +186,10 @@ export class SyncManager {
 
     const tree = treeResult.data;
 
-    // 3. Filter for documentation files (.md, .txt)
-    const docFiles = tree.tree.filter(
+    // 3. Filter for supported files (.md, .txt, and images)
+    const supportedFiles = tree.tree.filter(
       (entry) =>
-        entry.type === 'blob' &&
-        (entry.path.endsWith('.md') || entry.path.endsWith('.txt'))
+        entry.type === 'blob' && isSupportedFile(entry.path)
     );
 
     // 4. Get stored file index
@@ -181,7 +200,7 @@ export class SyncManager {
     const toUpdate: Array<{ path: string; sha: string; size?: number }> = [];
     const toDelete: string[] = [];
 
-    for (const file of docFiles) {
+    for (const file of supportedFiles) {
       const stored = storedIndex[file.path];
       if (!stored) {
         toAdd.push({ path: file.path, sha: file.sha, size: file.size });
@@ -191,7 +210,7 @@ export class SyncManager {
     }
 
     for (const filePath of Object.keys(storedIndex)) {
-      if (!docFiles.find((f) => f.path === filePath)) {
+      if (!supportedFiles.find((f) => f.path === filePath)) {
         toDelete.push(filePath);
       }
     }
@@ -211,16 +230,23 @@ export class SyncManager {
           ? commitResult.data.commit.committer.date
           : null;
 
-      // Decode and store
-      const content = GitHubClient.decodeContent(fileResult.data.content);
       const metadata: FileMetadata = {
         sha: file.sha,
         size_kb: file.size ? Math.round((file.size / 1024) * 10) / 10 : 0,
         last_modified: lastModified,
       };
 
-      await this.storageManager.setFile(repo, file.path, content, metadata);
-      this.searchEngine.indexDocument(repo, file.path, content);
+      if (isImageFile(file.path)) {
+        // Binary file - store as Buffer, skip search indexing
+        const content = GitHubClient.decodeBinaryContent(fileResult.data.content);
+        await this.storageManager.setBinaryFile(repo, file.path, content, metadata);
+        // DO NOT index images for search
+      } else {
+        // Text file - existing behavior
+        const content = GitHubClient.decodeContent(fileResult.data.content);
+        await this.storageManager.setFile(repo, file.path, content, metadata);
+        this.searchEngine.indexDocument(repo, file.path, content);
+      }
     }
 
     // 7. Delete removed files
@@ -235,7 +261,7 @@ export class SyncManager {
       treeSha: tree.sha,
       branch,
       lastSync: new Date().toISOString(),
-      fileCount: docFiles.length,
+      fileCount: supportedFiles.length,
     };
     await this.stateManager.setRepoState(repo, repoState);
 
@@ -247,7 +273,7 @@ export class SyncManager {
       added: toAdd.length,
       updated: toUpdate.length,
       deleted: toDelete.length,
-      unchanged: docFiles.length - toAdd.length - toUpdate.length,
+      unchanged: supportedFiles.length - toAdd.length - toUpdate.length,
     };
   }
 

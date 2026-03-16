@@ -500,6 +500,15 @@ export class GitHubClient {
   }
 
   /**
+   * Decode base64 encoded binary file content (images, etc.)
+   * Returns Buffer instead of string for binary data
+   */
+  static decodeBinaryContent(encoded: string): Buffer {
+    const cleaned = encoded.replace(/\n/g, '');
+    return Buffer.from(cleaned, 'base64');
+  }
+
+  /**
    * Get the remaining rate limit for the authenticated user
    * This is a helper method for debugging/monitoring
    */

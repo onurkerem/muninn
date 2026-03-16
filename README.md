@@ -64,11 +64,25 @@ Fetches the raw content of a single file by path.
 - `path`: File path within the repository
 
 ### `search_docs`
-Full-text search across configured repos using GitHub Search API.
+Full-text search across configured repos (local, instant).
 
 **Parameters:**
-- `query`: Search query
+- `query`: Search query (2+ characters required)
 - `repo`: Optional repository to search (omit to search all configured repos)
+
+### `list_images`
+Recursively lists all image files (jpg, jpeg, png) in a repo with local file paths.
+
+**Parameters:**
+- `repo`: Repository in `owner/repo` format
+- `path`: Optional path to list from
+
+### `get_image`
+Get the local file path for an image. Use with image analysis tools.
+
+**Parameters:**
+- `repo`: Repository in `owner/repo` format
+- `path`: Image file path within the repository
 
 ## Response Format
 

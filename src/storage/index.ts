@@ -63,7 +63,7 @@ export class StorageManager {
   /**
    * Get the file path for a document
    */
-  private getFilePath(repo: string, filePath: string): string {
+  public getFilePath(repo: string, filePath: string): string {
     return path.join(this.getRepoDir(repo), filePath);
   }
 
@@ -166,21 +166,25 @@ export class StorageManager {
   }
 
   /**
-   * List files in a repository with optional path prefix filter
+   * List text files (.md, .txt) in a repository with optional path prefix filter
    */
   async listFiles(repo: string, prefix?: string): Promise<FileInfo[]> {
     const index = await this.getFileIndex(repo);
+    const textExtensions = ['.md', '.txt'];
     const files: FileInfo[] = [];
 
     for (const [filePath, metadata] of Object.entries(index)) {
       if (prefix && !filePath.startsWith(prefix)) {
         continue;
       }
-      files.push({
-        path: filePath,
-        size_kb: metadata.size_kb,
-        last_modified: metadata.last_modified,
-      });
+      const ext = path.extname(filePath).toLowerCase();
+      if (textExtensions.includes(ext)) {
+        files.push({
+          path: filePath,
+          size_kb: metadata.size_kb,
+          last_modified: metadata.last_modified,
+        });
+      }
     }
 
     // Sort by path
@@ -195,6 +199,76 @@ export class StorageManager {
   async hasRepoData(repo: string): Promise<boolean> {
     const index = await this.getFileIndex(repo);
     return Object.keys(index).length > 0;
+  }
+
+  /**
+   * Get a binary file from local storage
+   * Returns null if file doesn't exist
+   */
+  async getBinaryFile(repo: string, filePath: string): Promise<{ content: Buffer; metadata: FileMetadata } | null> {
+    const fullPath = this.getFilePath(repo, filePath);
+    try {
+      const content = await fs.promises.readFile(fullPath);
+      const index = await this.getFileIndex(repo);
+      const metadata = index[filePath];
+      if (!metadata) {
+        return null;
+      }
+      return { content, metadata };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Write a binary file to local storage
+   */
+  async setBinaryFile(
+    repo: string,
+    filePath: string,
+    content: Buffer,
+    metadata: FileMetadata
+  ): Promise<void> {
+    await this.ensureRepoDir(repo);
+
+    // Write file content (binary mode - no encoding)
+    const fullPath = this.getFilePath(repo, filePath);
+    const dir = path.dirname(fullPath);
+    await fs.promises.mkdir(dir, { recursive: true });
+    await fs.promises.writeFile(fullPath, content);
+
+    // Update index
+    const index = await this.getFileIndex(repo);
+    index[filePath] = metadata;
+    await this.setFileIndex(repo, index);
+  }
+
+  /**
+   * List image files in a repository with optional path prefix filter
+   */
+  async listImageFiles(repo: string, prefix?: string): Promise<FileInfo[]> {
+    const index = await this.getFileIndex(repo);
+    const imageExtensions = ['.jpg', '.jpeg', '.png'];
+    const files: FileInfo[] = [];
+
+    for (const [filePath, metadata] of Object.entries(index)) {
+      if (prefix && !filePath.startsWith(prefix)) {
+        continue;
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      if (imageExtensions.includes(ext)) {
+        files.push({
+          path: filePath,
+          size_kb: metadata.size_kb,
+          last_modified: metadata.last_modified,
+        });
+      }
+    }
+
+    // Sort by path
+    files.sort((a, b) => a.path.localeCompare(b.path));
+
+    return files;
   }
 
   /**

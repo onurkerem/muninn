@@ -331,5 +331,108 @@ export function createMcpServer(
     }
   );
 
+  // Register list_images tool
+  server.tool(
+    'list_images',
+    'Recursively lists all image files (jpg, jpeg, png) in a repo with full local file paths. Use local_path with image analysis tools.',
+    {
+      repo: z.string().describe('Repository in owner/repo format'),
+      path: z.string().optional().describe('Optional path to list from'),
+    },
+    async ({ repo, path }) => {
+      const parsed = parseRepoString(repo);
+      if (!parsed) {
+        const error: GitHubError = {
+          error: 'repository_not_found',
+          repo,
+          message: `Invalid repository format: ${repo}. Expected format: owner/repo`,
+        };
+        return { content: [{ type: 'text', text: encode(error) }] };
+      }
+
+      // Ensure repo is synced (lazy sync)
+      await syncManager.ensureSynced(repo);
+
+      // List image files from local storage
+      const images = await storageManager.listImageFiles(repo, path);
+
+      // Build response using TOON format
+      const output = encode({
+        repo,
+        images: images.map((img, i) => ({
+          index: i + 1,
+          path: img.path,
+          local_path: storageManager.getFilePath(repo, img.path),
+          size_kb: img.size_kb,
+          last_modified: img.last_modified,
+        })),
+      });
+
+      return {
+        content: [{ type: 'text', text: output }],
+      };
+    }
+  );
+
+  // Register get_image tool
+  server.tool(
+    'get_image',
+    'Get the full local file path for an image. Returns local_path for use with image analysis tools.',
+    {
+      repo: z.string().describe('Repository in owner/repo format'),
+      path: z.string().describe('Image file path within the repository'),
+    },
+    async ({ repo, path }) => {
+      const parsed = parseRepoString(repo);
+      if (!parsed) {
+        const error: GitHubError = {
+          error: 'file_not_found',
+          repo,
+          path,
+          message: `Invalid repository format: ${repo}. Expected format: owner/repo`,
+        };
+        return { content: [{ type: 'text', text: encode(error) }] };
+      }
+
+      // Ensure repo is synced (lazy sync)
+      await syncManager.ensureSynced(repo);
+
+      // Try to get image file from local storage
+      const localFile = await storageManager.getBinaryFile(repo, path);
+
+      if (localFile) {
+        const repoState = await syncManager.getRepoState(repo);
+        const branch = repoState?.branch || 'main';
+        const htmlUrl = buildFileHtmlUrl(parsed.owner, parsed.repo, branch, path);
+
+        return {
+          content: [{
+            type: 'text',
+            text: encode({
+              repo,
+              path,
+              local_path: storageManager.getFilePath(repo, path),
+              size_kb: localFile.metadata.size_kb,
+              last_modified: localFile.metadata.last_modified,
+              html_url: htmlUrl,
+            }),
+          }],
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: encode({
+            error: 'file_not_found',
+            repo,
+            path,
+            message: `Image not found: ${path}`,
+          }),
+        }],
+      };
+    }
+  );
+
   return server;
 }
