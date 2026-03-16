@@ -235,7 +235,7 @@ export class GitHubClient {
     };
 
     if (pat) {
-      this.headers['Authorization'] = `Bearer ${pat}`;
+      this.headers['Authorization'] = `token ${pat}`;
     }
   }
 

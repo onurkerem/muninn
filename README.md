@@ -21,6 +21,8 @@ Add to your MCP client configuration:
 }
 ```
 
+**Note:** `--github-pat` is optional for public repos, required for private repos.
+
 ### Version Options
 
 | Config | Behavior |

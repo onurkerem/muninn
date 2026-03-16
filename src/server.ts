@@ -8,6 +8,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { encode } from '@toon-format/toon';
 import { GitHubClient, parseRepoString, buildFileHtmlUrl, GitHubError } from './github.js';
+import { StorageManager } from './storage/index.js';
+import { SyncManager } from './storage/sync.js';
+import { SearchEngine } from './search/index.js';
 
 // ============================================================================
 // Server Factory
@@ -16,7 +19,13 @@ import { GitHubClient, parseRepoString, buildFileHtmlUrl, GitHubError } from './
 /**
  * Create and configure the MCP server with all tools
  */
-export function createMcpServer(repos: string[], githubClient: GitHubClient): McpServer {
+export function createMcpServer(
+  repos: string[],
+  githubClient: GitHubClient,
+  storageManager: StorageManager,
+  syncManager: SyncManager,
+  searchEngine: SearchEngine
+): McpServer {
   const server = new McpServer({
     name: 'muninn',
     version: '0.1.0',
@@ -53,7 +62,7 @@ export function createMcpServer(repos: string[], githubClient: GitHubClient): Mc
         return { content: [{ type: 'text', text: encode(error) }] };
       }
 
-      // Fetch repo info and README in parallel
+      // Fetch repo info and README in parallel (still uses GitHub API)
       const [repoResult, readmeResult] = await Promise.all([
         githubClient.getRepo(parsed.owner, parsed.repo),
         githubClient.getReadme(parsed.owner, parsed.repo),
@@ -107,55 +116,16 @@ export function createMcpServer(repos: string[], githubClient: GitHubClient): Mc
         return { content: [{ type: 'text', text: encode(error) }] };
       }
 
-      // First get repo to find default branch
-      const repoResult = await githubClient.getRepo(parsed.owner, parsed.repo);
-      if (!repoResult.ok) {
-        return { content: [{ type: 'text', text: encode(repoResult.error) }] };
-      }
+      // Ensure repo is synced (lazy sync)
+      await syncManager.ensureSynced(repo);
 
-      const branch = repoResult.data.default_branch;
-
-      // Get the file tree
-      const treeResult = await githubClient.getTree(parsed.owner, parsed.repo, branch);
-      if (!treeResult.ok) {
-        return { content: [{ type: 'text', text: encode(treeResult.error) }] };
-      }
-
-      // Filter for .md and .txt files, optionally by path prefix
-      const docFiles = treeResult.data.tree.filter((entry) => {
-        if (entry.type !== 'blob') return false;
-        const isDoc = entry.path.endsWith('.md') || entry.path.endsWith('.txt');
-        if (!isDoc) return false;
-        if (path && !entry.path.startsWith(path)) return false;
-        return true;
-      });
-
-      // Get last commit dates for each file (batch with Promise.all)
-      const filesWithDates = await Promise.all(
-        docFiles.map(async (file) => {
-          const commitResult = await githubClient.getLastCommit(
-            parsed.owner,
-            parsed.repo,
-            file.path
-          );
-          return {
-            path: file.path,
-            size_kb: file.size ? Math.round((file.size / 1024) * 10) / 10 : 0,
-            last_modified:
-              commitResult.ok && commitResult.data
-                ? commitResult.data.commit.committer.date
-                : null,
-          };
-        })
-      );
-
-      // Sort by path
-      filesWithDates.sort((a, b) => a.path.localeCompare(b.path));
+      // List files from local storage
+      const files = await storageManager.listFiles(repo, path);
 
       // Build response using TOON format with indexed array
       const output = encode({
         repo: repo,
-        files: filesWithDates.map((f, i) => ({
+        files: files.map((f, i) => ({
           index: i + 1,
           path: f.path,
           size_kb: f.size_kb,
@@ -189,7 +159,41 @@ export function createMcpServer(repos: string[], githubClient: GitHubClient): Mc
         return { content: [{ type: 'text', text: encode(error) }] };
       }
 
-      // Get repo for default branch and file content in parallel
+      // Ensure repo is synced (lazy sync)
+      await syncManager.ensureSynced(repo);
+
+      // Try to get file from local storage
+      const localFile = await storageManager.getFile(repo, path);
+
+      if (localFile) {
+        // Build TOON frontmatter + content from local storage
+        const repoState = await syncManager.getRepoState(repo);
+        const branch = repoState?.branch || 'main';
+        const htmlUrl = buildFileHtmlUrl(parsed.owner, parsed.repo, branch, path);
+
+        const frontmatter = encode({
+          repo,
+          path,
+          last_modified: localFile.metadata.last_modified,
+          html_url: htmlUrl,
+          size_kb: localFile.metadata.size_kb,
+        });
+
+        // Indent content by 2 spaces for TOON format
+        const indentedContent = localFile.content
+          .split('\n')
+          .map((line) => `  ${line}`)
+          .join('\n');
+
+        const output = `${frontmatter}\ncontent:\n${indentedContent}`;
+
+        return {
+          content: [{ type: 'text', text: output }],
+        };
+      }
+
+      // File not found locally - fetch from GitHub API (fallback always enabled)
+      // Fallback: fetch from GitHub API
       const [repoResult, fileResult, commitResult] = await Promise.all([
         githubClient.getRepo(parsed.owner, parsed.repo),
         githubClient.getFileContent(parsed.owner, parsed.repo, path),
@@ -226,6 +230,14 @@ export function createMcpServer(repos: string[], githubClient: GitHubClient): Mc
           : null;
       const htmlUrl = buildFileHtmlUrl(parsed.owner, parsed.repo, branch, path);
 
+      // Cache the file locally for future requests
+      await storageManager.setFile(repo, path, content, {
+        sha: fileData.sha,
+        size_kb: sizeKb,
+        last_modified: lastModified,
+      });
+      searchEngine.indexDocument(repo, path, content);
+
       // Build TOON frontmatter + content
       const frontmatter = encode({
         repo,
@@ -252,7 +264,7 @@ export function createMcpServer(repos: string[], githubClient: GitHubClient): Mc
   // Register search_docs tool
   server.tool(
     'search_docs',
-    'Full-text search across configured repos using GitHub Search API. Returns matching files with snippets.',
+    'Full-text search across configured repos. Returns matching files with snippets. Note: Single-character queries return no results - use 2+ characters for meaningful matches. Snippets show [start]/[end] markers to indicate truncation.',
     {
       query: z.string().describe('Search query'),
       repo: z.string().optional().describe('Optional repository to search (omit to search all configured repos)'),
@@ -275,52 +287,36 @@ export function createMcpServer(repos: string[], githubClient: GitHubClient): Mc
         reposToSearch = repos;
       }
 
-      // Search each repo and merge results
-      const allResults: Array<{
-        repo: string;
-        path: string;
-        snippet: string;
-        html_url: string;
-      }> = [];
+      // Ensure all repos are synced (lazy sync)
+      await Promise.all(reposToSearch.map((r) => syncManager.ensureSynced(r)));
 
-      for (const repoName of reposToSearch) {
-        const parsed = parseRepoString(repoName);
-        if (!parsed) continue;
+      // Search using local search engine
+      const searchResults = await searchEngine.search(query, repo);
 
-        const searchResult = await githubClient.searchCode(query, parsed.owner, parsed.repo);
+      // Build HTML URLs for results
+      const resultsWithUrls = await Promise.all(
+        searchResults.map(async (result) => {
+          const repoState = await syncManager.getRepoState(result.repo);
+          const parsed = parseRepoString(result.repo);
+          const branch = repoState?.branch || 'main';
+          const htmlUrl = parsed
+            ? buildFileHtmlUrl(parsed.owner, parsed.repo, branch, result.path)
+            : '';
 
-        if (!searchResult.ok) {
-          // If rate limited, return the error
-          if (searchResult.error.error === 'rate_limit_exceeded') {
-            return { content: [{ type: 'text', text: encode(searchResult.error) }] };
-          }
-          // Skip repos with errors when searching all repos
-          continue;
-        }
-
-        for (const item of searchResult.data.items) {
-          // Strip HTML tags from text_matches if available
-          let snippet = '';
-          if (item.text_matches && item.text_matches.length > 0) {
-            snippet = item.text_matches[0].fragment.replace(/<[^>]*>/g, '');
-          } else {
-            snippet = `...${item.name}`;
-          }
-
-          allResults.push({
-            repo: repoName,
-            path: item.path,
-            snippet,
-            html_url: item.html_url,
-          });
-        }
-      }
+          return {
+            repo: result.repo,
+            path: result.path,
+            snippet: result.snippet,
+            html_url: htmlUrl,
+          };
+        })
+      );
 
       // Build response
       const response = {
         query,
-        total_matches: allResults.length,
-        results: allResults.map((r, i) => ({
+        total_matches: resultsWithUrls.length,
+        results: resultsWithUrls.map((r, i) => ({
           index: i + 1,
           repo: r.repo,
           path: r.path,

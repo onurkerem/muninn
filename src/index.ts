@@ -9,6 +9,10 @@ import { Command } from 'commander';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { GitHubClient } from './github.js';
 import { createMcpServer } from './server.js';
+import { StorageManager, getDefaultStoragePath } from './storage/index.js';
+import { StateManager } from './storage/state.js';
+import { SyncManager } from './storage/sync.js';
+import { SearchEngine } from './search/index.js';
 
 const program = new Command();
 
@@ -38,8 +42,17 @@ for (const repo of repos) {
   }
 }
 
+// Determine storage path (always use default)
+const storagePath = getDefaultStoragePath();
+
 // Create GitHub client
 const githubClient = new GitHubClient(options.githubPat);
+
+// Create storage managers
+const storageManager = new StorageManager(storagePath);
+const stateManager = new StateManager(storagePath);
+const searchEngine = new SearchEngine(storagePath);
+const syncManager = new SyncManager(githubClient, storageManager, stateManager, searchEngine);
 
 // Validate repos are accessible on startup
 async function validateRepos(): Promise<void> {
@@ -74,11 +87,24 @@ async function validateRepos(): Promise<void> {
 // Main entry point
 async function main(): Promise<void> {
   try {
+    // Initialize storage
+    await storageManager.initialize();
+    console.error(`Storage initialized at: ${storagePath}`);
+
+    // Load existing search index
+    await searchEngine.loadIndex();
+
     // Validate repos first
     await validateRepos();
 
     // Create and configure MCP server
-    const server = createMcpServer(repos, githubClient);
+    const server = createMcpServer(
+      repos,
+      githubClient,
+      storageManager,
+      syncManager,
+      searchEngine
+    );
 
     // Connect using stdio transport
     const transport = new StdioServerTransport();
